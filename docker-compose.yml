@@ -1,0 +1,8 @@
+services:
+  imgbb-service:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - IMGBB_API_KEY=${IMGBB_API_KEY:-}
