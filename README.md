@@ -1,6 +1,6 @@
 # ImgBB Go Service 🚀
 
-![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)
+![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)
 ![Docker](https://img.shields.io/badge/Docker-Supported-2496ED?style=flat&logo=docker)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat)
 
@@ -17,7 +17,7 @@ A lightweight, blazing-fast Go microservice designed to act as a bridge for uplo
 
 ### Prerequisites
 - [Docker](https://www.docker.com/) (Recommended)
-- [Go 1.21+](https://go.dev/) (If running locally without Docker)
+- [Go 1.26+](https://go.dev/) (If running locally without Docker)
 - An ImgBB API Key (Get it for free at [api.imgbb.com](https://api.imgbb.com/))
 
 ### Running with Docker (Recommended)
