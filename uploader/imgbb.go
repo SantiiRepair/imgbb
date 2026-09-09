@@ -1,11 +1,14 @@
 package uploader
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
+	"time"
 )
 
 const ImgBBApiURL = "https://api.imgbb.com/1/upload"
@@ -19,14 +22,24 @@ type ImgBBResponse struct {
 }
 
 // Upload sends the image (in bytes) to ImgBB and returns the public URL
-func Upload(apiKey string, imageBytes []byte) (string, error) {
+func Upload(ctx context.Context, apiKey string, imageBytes []byte) (string, error) {
 	encoded := base64.StdEncoding.EncodeToString(imageBytes)
 
 	data := url.Values{}
 	data.Set("key", apiKey)
 	data.Set("image", encoded)
 
-	resp, err := http.PostForm(ImgBBApiURL, data)
+	req, err := http.NewRequestWithContext(ctx, "POST", ImgBBApiURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{
+		Timeout: 20 * time.Second,
+	}
+	
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
