@@ -42,3 +42,11 @@ jobs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         platforms: linux/amd64,linux/arm64
+
+    - name: Update Docker Hub Description
+      uses: peter-evans/dockerhub-description@v4
+      with:
+        username: santiirepair
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+        repository: santiirepair/imgbb
+        readme-filepath: ./README.md
