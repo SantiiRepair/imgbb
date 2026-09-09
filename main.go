@@ -2,15 +2,17 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"io"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 
 	"github.com/santiirepair/imgbb/uploader"
 )
@@ -26,79 +28,74 @@ func main() {
 	if s, err := strconv.Atoi(maxSizeStr); err == nil && s > 0 {
 		maxSizeMB = s
 	}
-	maxBytes := int64(maxSizeMB) << 20
 
-	mux := http.NewServeMux()
-
-	// Health Check Endpoint
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+	app := fiber.New(fiber.Config{
+		BodyLimit: maxSizeMB * 1024 * 1024,
 	})
 
-	mux.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
-		// CORS Headers
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
+	// Middleware
+	app.Use(recover.New())
+	app.Use(logger.New())
+	app.Use(cors.New(cors.Config{
+		AllowOrigins: "*",
+		AllowMethods: "POST, OPTIONS, GET",
+	}))
 
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+	// Health Check
+	app.Get("/health", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{"status": "ok"})
+	})
 
-		// Limit upload size
-		r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
-		if err := r.ParseMultipartForm(maxBytes); err != nil {
-			http.Error(w, "File too large or malformed", http.StatusBadRequest)
-			return
-		}
-
+	// Upload Endpoint
+	app.Post("/upload", func(c *fiber.Ctx) error {
 		// Determine which API key to use
-		apiKey := r.FormValue("api_key")
+		apiKey := c.FormValue("api_key")
 		if apiKey == "" {
 			apiKey = defaultAPIKey
 		}
 
 		if apiKey == "" {
-			http.Error(w, "API key not provided in the request or configured in the server", http.StatusUnauthorized)
-			return
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "API key not provided in the request or configured in the server",
+			})
 		}
 
-		file, _, err := r.FormFile("image")
+		fileHeader, err := c.FormFile("image")
 		if err != nil {
-			http.Error(w, "The 'image' field is required", http.StatusBadRequest)
-			return
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "The 'image' field is required",
+			})
+		}
+
+		file, err := fileHeader.Open()
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to open image",
+			})
 		}
 		defer file.Close()
 
-		data, err := io.ReadAll(file)
-		if err != nil {
-			http.Error(w, "Error reading the image", http.StatusInternalServerError)
-			return
+		data := make([]byte, fileHeader.Size)
+		if _, err := file.Read(data); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to read image",
+			})
 		}
 
 		// Context for the upload request
-		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(c.Context(), 15*time.Second)
 		defer cancel()
 
-		// Upload to ImgBB directly
+		// Upload to ImgBB
 		url, err := uploader.Upload(ctx, apiKey, data)
 		if err != nil {
 			log.Printf("Error uploading to ImgBB: %v", err)
-			http.Error(w, "Error uploading the image", http.StatusInternalServerError)
-			return
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Error uploading the image to ImgBB",
+			})
 		}
 
-		// Respond with the URL
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"url": url,
-		})
+		return c.JSON(fiber.Map{"url": url})
 	})
 
 	port := os.Getenv("PORT")
@@ -106,27 +103,20 @@ func main() {
 		port = "8080"
 	}
 
-	server := &http.Server{
-		Addr:    ":" + port,
-		Handler: mux,
-	}
-
+	// Graceful shutdown channel
 	go func() {
-		log.Printf("ImgBB upload server started on port :%s\n", port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Error starting the server: %v", err)
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+		<-quit
+		log.Println("Shutting down server gracefully...")
+
+		if err := app.ShutdownWithTimeout(10 * time.Second); err != nil {
+			log.Fatalf("Server forced to shutdown: %v", err)
 		}
 	}()
 
-	// Graceful shutdown setup
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
-	<-quit
-	log.Println("Shutting down server gracefully...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+	log.Printf("ImgBB upload server started on port :%s\n", port)
+	if err := app.Listen(":" + port); err != nil {
+		log.Fatalf("Error starting the server: %v", err)
 	}
 }
