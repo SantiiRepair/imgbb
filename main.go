@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/santiirepair/imgbb/processor"
 	"github.com/santiirepair/imgbb/uploader"
 )
 
@@ -50,16 +49,8 @@ func main() {
 			return
 		}
 
-		// Process and convert to WebP with quality 80
-		webpData, err := processor.ConvertToWebP(data, 80.0)
-		if err != nil {
-			log.Printf("Error processing image to WebP: %v", err)
-			http.Error(w, "Error processing the image", http.StatusInternalServerError)
-			return
-		}
-
-		// Upload to ImgBB
-		url, err := uploader.Upload(apiKey, webpData)
+		// Upload to ImgBB directly
+		url, err := uploader.Upload(apiKey, data)
 		if err != nil {
 			log.Printf("Error uploading to ImgBB: %v", err)
 			http.Error(w, "Error uploading the image", http.StatusInternalServerError)
